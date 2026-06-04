@@ -1,49 +1,55 @@
-from fastapi import FastAPI
+import json
 import os
-from groq import Groq
-from dotenv import load_dotenv
+from fastapi import FastAPI, Body, HTTPException
+from pydantic import BaseModel
 
-load_dotenv()
+# Inicializa a API
+app = FastAPI(title="Fábrica de IA API")
+FICHEIRO_ARMAZEM = "armazem_logistica.json"
 
-# Inicializa a tua API
-app = FastAPI(title="Fábrica de Prompts Premium API")
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+def ler_armazem():
+    """Lê o armazém de ferramentas gerado pela Fábrica."""
+    if not os.path.exists(FICHEIRO_ARMAZEM):
+        return {}
+    with open(FICHEIRO_ARMAZEM, "r") as f:
+        data = json.load(f)
+        return data.get("ferramentas_a_venda", {})
 
-# O teu "Endpoint" (a morada que os clientes vão chamar)
-@app.get("/otimizar-prompt")
-def otimizar_prompt(ideia_simples: str):
+@app.get("/listar-ferramentas")
+def listar_ferramentas():
+    """Mostra aos clientes que ferramentas temos em stock."""
+    return {"stock_atual": list(ler_armazem().keys())}
+
+@app.post("/executar")
+def executar_servico(payload: dict = Body(...)):
     """
-    Esta função recebe uma ideia simples e devolve um prompt profissional.
+    O endpoint principal onde os clientes enviam o ID da ferramenta 
+    e os argumentos para a execução.
     """
-    print(f"[API] Pedido recebido para: {ideia_simples}")
+    ferramenta_id = payload.get("ferramenta_id")
+    argumentos = payload.get("argumentos")
     
-    prompt_sistema = (
-        "És um engenheiro de prompts especialista em Stable Diffusion e Midjourney. "
-        "Transforma o conceito do utilizador num prompt em inglês altamente detalhado, "
-        "cinematográfico e com especificações de iluminação. Devolve apenas o prompt final."
-    )
+    stock = ler_armazem()
+    
+    if ferramenta_id not in stock:
+        raise HTTPException(status_code=404, detail="Ferramenta não encontrada no armazém.")
+    
+    # Extrair o código que a tua IA escreveu
+    codigo = stock[ferramenta_id]["codigo"]
     
     try:
-        resposta = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": prompt_sistema},
-                {"role": "user", "content": ideia_simples}
-            ],
-            model="llama-3.1-8b-instant",
-            temperature=0.6,
-        )
+        # Cria um ambiente seguro para executar o código
+        namespace = {}
+        exec(codigo, namespace)
         
-        prompt_final = resposta.choices[0].message.content.strip()
+        # Chama a função 'executar' que o teu DEV criou
+        resultado = namespace["executar"](**argumentos)
         
-        # O que a tua API responde de volta para o cliente
+        # Incrementa as vitórias (opcional: podes criar um sistema de logs)
         return {
             "status": "sucesso",
-            "conceito_original": ideia_simples,
-            "prompt_otimizado": prompt_final
+            "resultado": resultado
         }
         
     except Exception as e:
-        return {"status": "erro", "detalhes": str(e)}
-
-# Comando para correr o servidor localmente
-# No terminal escreverias: uvicorn api_fabrica:app --reload
+        raise HTTPException(status_code=500, detail=f"Erro na execução da ferramenta: {str(e)}")
